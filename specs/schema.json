@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1",
+  "_comment": "Machine-readable contract for Konkreet spec frontmatter. Single source of truth: validate.py enforces this; SCHEMA.md documents it for humans. Keep all three (this, SCHEMA.md, SPEC_TEMPLATE.md) in sync.",
+  "allow_unknown_fields": false,
+  "enums": {
+    "service_values": [
+      "playground-service",
+      "team-service",
+      "match-service",
+      "live-engine",
+      "identity-service",
+      "notification-service",
+      "frontend"
+    ]
+  },
+  "fields": {
+    "id":           { "required": true, "type": "string", "pattern": "^PB-[0-9]+$" },
+    "title":        { "required": true, "type": "string" },
+    "status":       { "required": true, "type": "string", "enum": ["draft", "approved", "building", "in-review", "done"] },
+    "services":     { "required": true, "type": "list", "item_enum": "service_values" },
+    "change_class": { "required": true, "type": "string", "enum": ["intra-service-additive", "schema-migration", "cross-service-contract", "infra", "frontend-only"] },
+    "reversible":   { "required": true, "type": "bool" },
+    "risk":         { "required": true, "type": "string", "enum": ["low", "med", "high"] }
+  }
+}
