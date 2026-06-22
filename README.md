@@ -1,3 +1,135 @@
+# `factory/` — a local dark-factory SDLC, in four files
+
+This is the runnable companion to the blog post on building a **dark-factory
+(lights-out) software pipeline** locally. It turns a **spec** into a **reviewed,
+tested branch** with no human keystroke on the code:
+
+```
+git push spec ─▶ trigger ─▶ validate ─▶ generate ─▶ verify ─▶ gate (your review)
+```
+
+The whole factory is four small things: a validated spec (see [`../specs/`](../specs)),
+a git hook, a shell script, and a stock container image. Everything heavier
+(Step Functions, Bedrock, a workflow engine) is the *production* shape — this is
+the laptop sketch that proves the mechanism.
+
+> ⚠️ **This is a proof-of-concept, not a product.** It runs synchronously in your
+> own working checkout, uses a personal `claude` login, and keeps no run-state.
+> It exists to demonstrate the *shape* of an agentic SDLC, not to ship code
+> unattended. See "What this is NOT" below.
+
+---
+
+## The files
+
+| File | Role | What it is |
+|---|---|---|
+| `factory.sh` | **the line** (orchestrator) | validates → branches → generates → verifies → commits |
+| `demo.sh` | demo driver | runs the whole flow hands-free, for a screen recording |
+| `demo-reset.sh` | reset | returns the repo to a clean, re-runnable state |
+| `LAST_RUN.md` | generated | the agent's own summary of the most recent run (overwritten each run) |
+| `BLOCKED.md` | generated | written only if the generate step refuses to guess on a vague spec |
+
+The **trigger** is not in this folder — it's a `post-receive` git hook on a bare
+repo that calls `factory.sh`. See [Trigger](#the-trigger) below.
+
+---
+
+## The stages (what `factory.sh` does)
+
+| # | Stage | Tool | Notes |
+|---|---|---|---|
+| 0 | **validate** | `python3 ../specs/validate.py` | hard gate — a malformed spec stops the run before anything is generated |
+| 1 | **branch** | `git switch -c factory/<spec>` | work happens isolated; nothing existing is touched |
+| 2 | **generate** | `claude` (host CLI) | file-edit tools **only** — no shell, so the agent can't run/grade its own work |
+| 3 | **verify** | `podman run maven:3.9-amazoncorretto-21 mvn verify` | the **inspector is never the builder**; runs the real JUnit suite + JaCoCo gate in the same toolchain as CI |
+| 4 | **gate** | `git commit` → branch | your review is the human gate (swap in `gh pr create` on GitHub) |
+
+Two load-bearing design choices:
+
+- **The agent cannot verify itself.** Generate gets `Read,Edit,Write,Grep,Glob`
+  and nothing else; the *script* owns verify. The thing being graded doesn't get
+  to write its own report card.
+- **Verify runs in a container matching CI.** `corretto-21` is the same runtime
+  the CodeBuild pipeline uses, so "green locally" means "green in CI."
+
+---
+
+## Requirements
+
+- `bash`, `git`, `python3` (stdlib only)
+- [`podman`](https://podman.io) with a running machine (for the verify stage)
+- the [`claude`](https://docs.claude.com/en/docs/claude-code) CLI, authenticated
+- a populated `~/.m2` helps (mounted into the verify container to avoid re-downloads)
+
+---
+
+## Run it
+
+### Directly
+
+```bash
+# from the repo root, on a clean main:
+./factory/factory.sh specs/PB-1-Playground-three-point-line/PB-1-playground-three-point-line.md
+```
+
+On success you land on `factory/PB-1-…` with a commit ready to review:
+
+```bash
+git diff main..factory/PB-1-playground-three-point-line
+```
+
+### The trigger (push → factory)
+
+The factory fires on a push to a **local bare repo** (a stand-in for CodeCommit /
+GitHub). One-time setup:
+
+```bash
+git init --bare --initial-branch=main ~/konkreet-factory.git
+git remote add factory ~/konkreet-factory.git
+# install the post-receive hook (see the blog post for the script) into:
+#   ~/konkreet-factory.git/hooks/post-receive
+```
+
+Then the whole flow is one command:
+
+```bash
+git push factory main      # → trigger fires → factory.sh runs → tested branch
+```
+
+### For a recording
+
+```bash
+./factory/demo.sh          # press Enter between beats while narrating
+./factory/demo.sh --auto   # timed pauses, hands-free (good for a GIF)
+```
+
+`demo.sh` self-resets first, so you can re-run take after take.
+
+---
+
+## What this is NOT (and what production needs)
+
+| Local POC | Production |
+|---|---|
+| `factory.sh` (bash, no state) | a workflow engine — Step Functions / Temporal / GH Actions |
+| trigger runs synchronously in your checkout | event-driven dispatch into an **isolated, ephemeral** workspace |
+| `claude` CLI, personal login | a managed model endpoint (e.g. **Bedrock**) with service creds + cost controls |
+| one service's unit tests | integration + contract tests, linters/ArchUnit, SAST, dependency/secret scans |
+| grounding = a file path typed by hand | **RAG** over the codebase + a long-term decision memory |
+| "go look at a branch" | a real PR with required checks + risk-based routing |
+| **no run-state** — dies halfway, start over | durable state, retries, idempotency, audit trail |
+
+Not faked at all, and needed for a real factory: **routing by risk**, **measuring
+human-touch rate to earn autonomy**, and **mutation testing to trust the tests**.
+
+---
+
+## See also
+
+- [`../specs/`](../specs) — the spec format, schema, and validator the factory consumes
+- [`../CLAUDE.md`](../CLAUDE.md) — project conventions (part of the generate step's grounding)
+
 # `specs/` — the work orders the factory consumes
 
 A **spec** is the unit of work in the [dark-factory pipeline](../factory). It's the
